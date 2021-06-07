@@ -12,15 +12,15 @@ if [ "$1" = clean ]; then
     exit
 fi
 
-if [ ! -d ./wolfssl ]; then
-    git clone $WOLFSSL_GIT
-    cd wolfssl
-    ./autogen.sh
-    cd -
-fi
-
 build_wolfssl()
 {
+    if [ ! -d ./wolfssl ]; then
+        git clone $WOLFSSL_GIT
+        cd wolfssl
+        ./autogen.sh
+        cd -
+    fi
+
     cd wolfssl
     if [ -f Makefile ]; then
         make distclean
@@ -35,11 +35,9 @@ build_wolfssl()
     cd -
 }
 
-build_app()
-{
+if [ "$1" = wolfssl ]; then
     build_wolfssl
+else
     gcc $WOLFSSL_INCS $WOLFSSL_LIBS hkdf.c -o hkdf
-}
-
-build_app
+fi
 

@@ -7,6 +7,119 @@
 #include "wolfssl/options.h"
 #include "wolfssl/wolfcrypt/hmac.h"
 
+int HKDF_Extract(int type,
+                 uint8_t *salt,  uint32_t saltSz,
+                 uint8_t *inKey, uint32_t inKeySz,
+                 uint8_t *out)
+{
+    uint8_t tmp[WC_MAX_DIGEST_SIZE]; /* local salt */
+    uint8_t *localSalt; /* either points to user input or tmp */
+    Hmac hmac;
+    int hashSz = wc_HmacSizeByType(type);
+    int ret;
+
+    localSalt = salt;
+
+    if (localSalt == NULL) {
+        memset(tmp, 0, hashSz);
+        localSalt = tmp;
+        saltSz = hashSz;
+    }
+
+    if (wc_HmacInit(&hmac, NULL, INVALID_DEVID) != 0)
+        return -1;
+
+    if ((ret = wc_HmacSetKey(&hmac, type, localSalt, saltSz)) != 0)
+        goto err;
+
+    if ((ret = wc_HmacUpdate(&hmac, inKey, inKeySz)) != 0)
+        goto err;
+
+    ret = wc_HmacFinal(&hmac, out);
+
+err:
+    wc_HmacFree(&hmac);
+
+    return ret;
+}
+
+int HKDF_Expand(int type,
+                uint8_t *inKey, uint32_t inKeySz,
+                uint8_t *info,  uint32_t infoSz,
+                uint8_t *out,   uint32_t outSz)
+{
+    uint8_t tmp[WC_MAX_DIGEST_SIZE];
+    Hmac hmac;
+    uint32_t hashSz = wc_HmacSizeByType(type);
+    uint32_t outIdx = 0;
+    uint8_t n = 1;
+    int ret = 0;
+
+    /*
+     * RFC 5869 states that the length of output keying material in
+     * octets must be L <= 255*HashLen or N = ceil(L/HashLen)
+     */
+
+    if ((out == NULL) ||
+        (((outSz / hashSz) + ((outSz % hashSz) != 0)) > 255))
+        return -1;
+
+    if (wc_HmacInit(&hmac, NULL, INVALID_DEVID) != 0)
+        return -1;
+
+    if ((ret = wc_HmacSetKey(&hmac, type, inKey, inKeySz)) != 0)
+        goto err;
+
+    while (outIdx < outSz) {
+        int tmpSz = (n == 1) ? 0 : hashSz;
+        uint32_t left = (outSz - outIdx);
+
+        if ((ret = wc_HmacUpdate(&hmac, tmp, tmpSz)) != 0)
+            break;
+
+        if ((ret = wc_HmacUpdate(&hmac, info, infoSz)) != 0)
+            break;
+
+        if ((ret = wc_HmacUpdate(&hmac, &n, 1)) != 0)
+            break;
+
+        if ((ret = wc_HmacFinal(&hmac, tmp)) != 0)
+            break;
+
+        left = (left > hashSz) ? hashSz : left;
+        memcpy((out + outIdx), tmp, left);
+
+        outIdx += hashSz;
+        n++;
+    }
+
+err:
+    wc_HmacFree(&hmac);
+
+    return ret;
+}
+
+int HKDF(int type,
+         uint8_t *inKey, uint32_t inKeySz,
+         uint8_t *salt,  uint32_t saltSz,
+         uint8_t *info,  uint32_t infoSz,
+         uint8_t *out,   uint32_t outSz)
+{
+    uint8_t prk[WC_MAX_DIGEST_SIZE];
+    int hashSz = wc_HmacSizeByType(type);
+
+    if (hashSz < 0)
+        return -1;
+
+    if (HKDF_Extract(type, salt, saltSz, inKey, inKeySz, prk) != 0)
+        return -1;
+
+    if (HKDF_Expand(type, prk, hashSz, info, infoSz, out, outSz) != 0)
+        return -1;
+
+    return 0;
+}
+
 /* test cases from https://tools.ietf.org/html/rfc5869 */
 struct {
     int alg;
@@ -237,11 +350,11 @@ int main(void)
     for (i = 0; tests[i].alg != -1; i++) {
         okm = malloc(tests[i].okm_size);
 
-        if ((rc = wc_HKDF(tests[i].alg,
-                          tests[i].ikm, tests[i].ikm_size,
-                          tests[i].salt, tests[i].salt_size,
-                          tests[i].info, tests[i].info_size,
-                          okm, tests[i].okm_size)) != 0) {
+        if ((rc = HKDF(tests[i].alg,
+                       tests[i].ikm, tests[i].ikm_size,
+                       tests[i].salt, tests[i].salt_size,
+                       tests[i].info, tests[i].info_size,
+                       okm, tests[i].okm_size)) != 0) {
             printf("ERROR: HKDF failed (%d)\n", rc);
             exit(1);
         }
