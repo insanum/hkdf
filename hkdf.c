@@ -246,16 +246,15 @@ int main(void)
             exit(1);
         }
 
-        printf("OKM: 0x");
+        printf("(%d) OKM: 0x", (i + 1));
         for (j = 0; j < tests[i].okm_size; j++)
             printf("%02x", okm[j]);
         printf(" ");
         for (j = 0; j < tests[i].okm_size; j++) {
             if (tests[i].okm[j] != okm[j])
-                printf("BAD!\n");
+                break;
         }
-        if (j == tests[i].okm_size)
-            printf("OK!\n");
+        printf("%s!\n", (j == tests[i].okm_size) ? "OK" : "BAD");
 
         free(okm);
     }
